@@ -595,6 +595,62 @@ int lua_get_i2c_device(lua_State *L) {
 
     return 1;
 }
+int AP_HAL__I2CDevice_write_byte(lua_State *L) {
+    const int args = lua_gettop(L);
+    if(args != 2) {
+        return luaL_argerror(L,args, "expected 1 argument");
+    }
+
+    AP_HAL::I2CDevice * ud = *check_AP_HAL__I2CDevice(L, 1);
+    const uint8_t data_s = get_uint8_t(L, 2);
+
+    ud->get_semaphore()->take_blocking();
+    const bool success = static_cast<bool>(ud->transfer(&data_s,1,nullptr,0));
+    ud->get_semaphore()->give();
+    lua_pushboolean(L, success);
+    return success;
+
+}
+
+int AP_HAL__I2CDevice_read_bytes(lua_State *L) {
+    const int args = lua_gettop(L);
+    bool multi_register;
+    if (args == 1) {
+        multi_register = false;
+    } else if (args == 2) {
+        multi_register = true;
+    } else {
+        return luaL_argerror(L, args, "expected 0 or 1 argument");
+    }
+
+    AP_HAL::I2CDevice * ud = *check_AP_HAL__I2CDevice(L, 1);
+
+    uint8_t recv_length = 1;
+    if (multi_register) {
+        recv_length = get_uint8_t(L, 2);
+    }
+
+    uint8_t data[recv_length];
+
+    ud->get_semaphore()->take_blocking();
+    const bool success = static_cast<bool>(ud->read(data, recv_length));
+    ud->get_semaphore()->give();
+
+    if (success) {
+        if (!multi_register) {
+            lua_pushinteger(L, data[0]);
+        } else {
+            // push to table
+            lua_newtable(L);
+            for (uint8_t i=0; i < recv_length; i++) {
+                lua_pushinteger(L, i+1);
+                lua_pushinteger(L, data[i]);
+                lua_settable(L, -3);
+            }
+        }
+    }
+    return success;
+}
 
 int AP_HAL__I2CDevice_read_registers(lua_State *L) {
     const int args = lua_gettop(L);
