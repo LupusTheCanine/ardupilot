@@ -19,6 +19,7 @@
 #include <AP_InternalError/AP_InternalError.h>
 #include <AP_Logger/AP_Logger.h>
 #include <AP_Arming/AP_Arming.h>
+#include <AP_BLHeli/AP_BLHeli.h>
 #include <ch.h>
 
 extern const AP_HAL::HAL &hal;
@@ -118,11 +119,13 @@ void AP_IOMCU::thread_main(void)
     uart.set_unbuffered_writes(true);
 
 #if HAL_WITH_IO_MCU_BIDIR_DSHOT
-    AP_BLHeli* blh = AP_BLHeli::get_singleton();
     uint16_t erpm_period_ms = 10; // default 100Hz
+#if HAVE_AP_BLHELI_SUPPORT
+    AP_BLHeli* blh = AP_BLHeli::get_singleton();
     if (blh && blh->get_telemetry_rate() > 0) {
         erpm_period_ms = constrain_int16(1000 / blh->get_telemetry_rate(), 1, 1000);
     }
+#endif
 #endif
     trigger_event(IOEVENT_INIT);
 
@@ -343,7 +346,7 @@ void AP_IOMCU::thread_main(void)
         // update failsafe pwm
         if (pwm_out.failsafe_pwm_set != pwm_out.failsafe_pwm_sent) {
             uint8_t set = pwm_out.failsafe_pwm_set;
-            if (write_registers(PAGE_FAILSAFE_PWM, 0, IOMCU_MAX_CHANNELS, pwm_out.failsafe_pwm)) {
+            if (write_registers(PAGE_FAILSAFE_PWM, 0, IOMCU_MAX_RC_CHANNELS, pwm_out.failsafe_pwm)) {
                 pwm_out.failsafe_pwm_sent = set;
             }
         }
@@ -369,7 +372,7 @@ void AP_IOMCU::send_servo_out()
         if (rate.sbus_rate_hz == 0) {
             n = MIN(n, 8);
         } else {
-            n = MIN(n, IOMCU_MAX_CHANNELS);
+            n = MIN(n, IOMCU_MAX_RC_CHANNELS);
         }
         uint32_t now = AP_HAL::micros();
         if (now - last_servo_out_us >= 2000 || AP_BoardConfig::io_dshot()) {
@@ -409,10 +412,12 @@ void AP_IOMCU::read_erpm()
         return;
     }
     uint8_t motor_poles = 14;
+#if HAVE_AP_BLHELI_SUPPORT
     AP_BLHeli* blh = AP_BLHeli::get_singleton();
     if (blh) {
         motor_poles = blh->get_motor_poles();
     }
+#endif
     for (uint8_t i = 0; i < IOMCU_MAX_TELEM_CHANNELS/4; i++) {
         for (uint8_t j = 0; j < 4; j++) {
             const uint8_t esc_id = (i * 4 + j);

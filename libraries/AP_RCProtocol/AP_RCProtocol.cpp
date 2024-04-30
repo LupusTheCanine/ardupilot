@@ -34,6 +34,10 @@
 #include "AP_RCProtocol_FPort2.h"
 #include "AP_RCProtocol_DroneCAN.h"
 #include "AP_RCProtocol_GHST.h"
+#include "AP_RCProtocol_MAVLinkRadio.h"
+#include "AP_RCProtocol_Joystick_SFML.h"
+#include "AP_RCProtocol_UDP.h"
+#include "AP_RCProtocol_FDM.h"
 #include <AP_Math/AP_Math.h>
 #include <RC_Channel/RC_Channel.h>
 
@@ -88,6 +92,25 @@ void AP_RCProtocol::init()
 #if AP_RCPROTOCOL_GHST_ENABLED
     backend[AP_RCProtocol::GHST] = new AP_RCProtocol_GHST(*this);
 #endif
+#if AP_RCPROTOCOL_MAVLINK_RADIO_ENABLED
+    backend[AP_RCProtocol::MAVLINK_RADIO] = new AP_RCProtocol_MAVLinkRadio(*this);
+#endif
+#if AP_RCPROTOCOL_JOYSTICK_SFML_ENABLED
+    backend[AP_RCProtocol::JOYSTICK_SFML] = new AP_RCProtocol_Joystick_SFML(*this);
+#endif
+#if AP_RCPROTOCOL_UDP_ENABLED
+    const auto UDP_backend = new AP_RCProtocol_UDP(*this);
+    backend[AP_RCProtocol::UDP] = UDP_backend;
+#endif
+#if AP_RCPROTOCOL_FDM_ENABLED
+    const auto FDM_backend = new AP_RCProtocol_FDM(*this);;
+    backend[AP_RCProtocol::FDM] = FDM_backend;
+#if AP_RCPROTOCOL_UDP_ENABLED
+    // the UDP-Packed16Bit backend gives way to the FDM backend:
+    UDP_backend->set_fdm_backend(FDM_backend);
+#endif  // AP_RCPROTOCOL_UDP_ENABLED
+#endif  // AP_RCPROTOCOL_FDM_ENABLED
+
 }
 
 AP_RCProtocol::~AP_RCProtocol()
@@ -102,6 +125,13 @@ AP_RCProtocol::~AP_RCProtocol()
 
 bool AP_RCProtocol::should_search(uint32_t now_ms) const
 {
+#if AP_RCPROTOCOL_FDM_ENABLED && AP_RCPROTOCOL_UDP_ENABLED
+    // force re-detection when FDM is active and active backend is UDP values
+    if (_detected_protocol == AP_RCProtocol::UDP &&
+        ((AP_RCProtocol_FDM*)backend[AP_RCProtocol::FDM])->active()) {
+        return true;
+    }
+#endif  // AP_RCPROTOCOL_FDM_ENABLED && AP_RCPROTOCOL_UDP_ENABLED
 #if AP_RC_CHANNEL_ENABLED && !APM_BUILD_TYPE(APM_BUILD_UNKNOWN)
     if (_detected_protocol != AP_RCProtocol::NONE && !rc().option_is_enabled(RC_Channels::Option::MULTI_RECEIVER_SUPPORT)) {
         return false;
@@ -394,6 +424,14 @@ bool AP_RCProtocol::detect_async_protocol(rcprotocol_t protocol)
         return false;
     }
 
+#if AP_RC_CHANNEL_ENABLED
+    rc_protocols_mask = rc().enabled_protocols();
+#endif
+
+    if (!protocol_enabled(protocol)) {
+        return false;
+    }
+
     // nobody is providing data; can we provide data?
     if (!p->new_input()) {
         // we can't provide data
@@ -422,6 +460,18 @@ bool AP_RCProtocol::new_input()
     const rcprotocol_t pollable[] {
 #if AP_RCPROTOCOL_DRONECAN_ENABLED
         AP_RCProtocol::DRONECAN,
+#endif
+#if AP_RCPROTOCOL_MAVLINK_RADIO_ENABLED
+        AP_RCProtocol::MAVLINK_RADIO,
+#endif
+#if AP_RCPROTOCOL_JOYSTICK_SFML_ENABLED
+        AP_RCProtocol::JOYSTICK_SFML,
+#endif
+#if AP_RCPROTOCOL_UDP_ENABLED
+        AP_RCProtocol::UDP,
+#endif
+#if AP_RCPROTOCOL_FDM_ENABLED
+        AP_RCProtocol::FDM,
 #endif
     };
     for (const auto protocol : pollable) {
@@ -555,6 +605,22 @@ const char *AP_RCProtocol::protocol_name_from_protocol(rcprotocol_t protocol)
     case GHST:
         return "GHST";
 #endif
+#if AP_RCPROTOCOL_MAVLINK_RADIO_ENABLED
+    case MAVLINK_RADIO:
+        return "MAVRadio";
+#endif
+#if AP_RCPROTOCOL_JOYSTICK_SFML_ENABLED
+    case JOYSTICK_SFML:
+        return "SFML";
+#endif
+#if AP_RCPROTOCOL_UDP_ENABLED
+    case UDP:
+        return "UDP";
+#endif
+#if AP_RCPROTOCOL_FDM_ENABLED
+    case FDM:
+        return "FDM";
+#endif
     case NONE:
         break;
     }
@@ -582,12 +648,23 @@ void AP_RCProtocol::add_uart(AP_HAL::UARTDriver* uart)
 // return true if a specific protocol is enabled
 bool AP_RCProtocol::protocol_enabled(rcprotocol_t protocol) const
 {
-    if ((rc_protocols_mask & 1) != 0) {
+    if ((rc_protocols_mask & 1U) != 0) {
         // all protocols enabled
         return true;
     }
     return ((1U<<(uint8_t(protocol)+1)) & rc_protocols_mask) != 0;
 }
+
+#if AP_RCPROTOCOL_MAVLINK_RADIO_ENABLED
+void AP_RCProtocol::handle_radio_rc_channels(const mavlink_radio_rc_channels_t* packet)
+{
+    if (backend[AP_RCProtocol::MAVLINK_RADIO] == nullptr) {
+        return;
+    }
+
+    backend[AP_RCProtocol::MAVLINK_RADIO]->update_radio_rc_channels(packet);
+};
+#endif // AP_RCPROTOCOL_MAVLINK_RADIO_ENABLED
 
 namespace AP {
     AP_RCProtocol &RC()

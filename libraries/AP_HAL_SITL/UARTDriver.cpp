@@ -46,6 +46,7 @@
 
 #include <AP_Vehicle/AP_Vehicle_Type.h>
 #include <AP_Filesystem/AP_Filesystem.h>
+#include <AP_Common/ExpandingString.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -76,11 +77,11 @@ void UARTDriver::_begin(uint32_t baud, uint16_t rxSpace, uint16_t txSpace)
     if (strcmp(path, "GPS1") == 0) {
         /* gps */
         _connected = true;
-        _sim_serial_device = _sitlState->create_serial_sim("gps:1", "");
+        _sim_serial_device = _sitlState->create_serial_sim("gps:1", "", _portNumber);
     } else if (strcmp(path, "GPS2") == 0) {
         /* 2nd gps */
         _connected = true;
-        _sim_serial_device = _sitlState->create_serial_sim("gps:2", "");
+        _sim_serial_device = _sitlState->create_serial_sim("gps:2", "", _portNumber);
     } else {
         /* parse type:args:flags string for path. 
            For example:
@@ -108,7 +109,7 @@ void UARTDriver::_begin(uint32_t baud, uint16_t rxSpace, uint16_t txSpace)
             // add sanity check here that we're doing mavlink on this port?
             ::printf("SIM-ADSB connection on SERIAL%u\n", _portNumber);
             _connected = true;
-            _sim_serial_device = _sitlState->create_serial_sim("adsb", nullptr);
+            _sim_serial_device = _sitlState->create_serial_sim("adsb", nullptr, _portNumber);
         } else
 #endif
         if (strcmp(devtype, "tcp") == 0) {
@@ -131,7 +132,7 @@ void UARTDriver::_begin(uint32_t baud, uint16_t rxSpace, uint16_t txSpace)
             if (!_connected) {
                 ::printf("SIM connection %s:%s on SERIAL%u\n", args1, args2, _portNumber);
                 _connected = true;
-                _sim_serial_device = _sitlState->create_serial_sim(args1, args2);
+                _sim_serial_device = _sitlState->create_serial_sim(args1, args2, _portNumber);
             }
         } else if (strcmp(devtype, "udpclient") == 0) {
             // udp client connection
@@ -227,7 +228,9 @@ uint32_t UARTDriver::txspace(void)
 
 ssize_t UARTDriver::_read(uint8_t *buffer, uint16_t count)
 {
-    return _readbuffer.read(buffer, count);
+    const ssize_t ret = _readbuffer.read(buffer, count);
+    _rx_stats_bytes += ret;
+    return ret;
 }
 
 bool UARTDriver::_discard_input(void)
@@ -284,6 +287,8 @@ size_t UARTDriver::_write(const uint8_t *buffer, size_t size)
         }
 #endif // HAL_BUILD_AP_PERIPH
 
+    // Include lost byte in tx count, we think we sent it even though it was never added to the write buffer
+    _tx_stats_bytes += lost_byte;
 
     const size_t ret = _writebuffer.write(buffer, size - lost_byte) + lost_byte;
     if (_unbuffered_writes) {
@@ -810,13 +815,11 @@ void UARTDriver::handle_writing_from_writebuffer_to_device()
     SITL::SIM *_sitl = AP::sitl();
     if (_sitl && _sitl->telem_baudlimit_enable) {
         // limit byte rate to configured baudrate
-        uint32_t now = AP_HAL::micros();
-        float dt = 1.0e-6 * (now - last_write_tick_us);
-        max_bytes = _uart_baudrate * dt / 10;
+        // Byte rate is bit rate divided by 10. 8 bits of data + start/stop bits
+        max_bytes = baud_limits.write.max_bytes(float(_uart_baudrate) * 0.1);
         if (max_bytes == 0) {
             return;
         }
-        last_write_tick_us = now;
     }
 #endif
     if (_packetise) {
@@ -834,6 +837,7 @@ void UARTDriver::handle_writing_from_writebuffer_to_device()
             ssize_t ret = send(_fd, tmpbuf, n, MSG_DONTWAIT);
             if (ret > 0) {
                 _writebuffer.advance(ret);
+                _tx_stats_bytes += ret;
             }
         }
     } else {
@@ -855,6 +859,7 @@ void UARTDriver::handle_writing_from_writebuffer_to_device()
             }
             if (nwritten > 0) {
                 _writebuffer.advance(nwritten);
+                _tx_stats_bytes += nwritten;
             }
         }
     }
@@ -877,13 +882,11 @@ void UARTDriver::handle_reading_from_device_to_readbuffer()
     SITL::SIM *_sitl = AP::sitl();
     if (_sitl && _sitl->telem_baudlimit_enable) {
         // limit byte rate to configured baudrate
-        uint32_t now = AP_HAL::micros();
-        float dt = 1.0e-6 * (now - last_read_tick_us);
-        max_bytes = _uart_baudrate * dt / 10;
+        // Byte rate is bit rate divided by 10. 8 bits of data + start/stop bits
+        max_bytes = baud_limits.read.max_bytes(float(_uart_baudrate) * 0.1);
         if (max_bytes == 0) {
             return;
         }
-        last_read_tick_us = now;
     }
 #endif
 
@@ -1008,9 +1011,32 @@ ssize_t UARTDriver::get_system_outqueue_length() const
 
 uint32_t UARTDriver::bw_in_bytes_per_second() const
 {
-    // if connected, assume at least a 10/100Mbps connection
-    const uint32_t bitrate = _connected ? 10E6 : _uart_baudrate;
+    // if connected, assume at least a 10/100Mbps connection if not limited
+    bool baud_limit = false;
+#if !defined(HAL_BUILD_AP_PERIPH)
+    SITL::SIM *_sitl = AP::sitl();
+    baud_limit = (_sitl != nullptr) && _sitl->telem_baudlimit_enable;
+#endif
+    const uint32_t bitrate = (_connected && !baud_limit) ? 10E6 : _uart_baudrate;
     return bitrate/10; // convert bits to bytes minus overhead
 };
+
+#if HAL_UART_STATS_ENABLED
+// request information on uart I/O for @SYS/uarts.txt for this uart
+void UARTDriver::uart_info(ExpandingString &str, StatsTracker &stats, const uint32_t dt_ms)
+{
+    const uint32_t tx_bytes = stats.tx.update(_tx_stats_bytes);
+    const uint32_t rx_bytes = stats.rx.update(_rx_stats_bytes);
+
+    str.printf("TX=%8u RX=%8u TXBD=%6u RXBD=%6u %s (%s)\n",
+                unsigned(tx_bytes),
+                unsigned(rx_bytes),
+                unsigned((tx_bytes * 10000) / dt_ms),
+                unsigned((rx_bytes * 10000) / dt_ms),
+                _connected ? "connected    " : "not connected",
+                _sitlState->_serial_path[_portNumber]);
+}
+#endif
+
 #endif // CONFIG_HAL_BOARD
 
