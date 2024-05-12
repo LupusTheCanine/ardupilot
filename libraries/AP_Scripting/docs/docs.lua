@@ -1109,6 +1109,7 @@ function AP_HAL__I2CDevice_ud:set_address(address) end
 ---@return integer|table|nil
 function AP_HAL__I2CDevice_ud:read_registers(register_num, read_length) end
 
+
 -- desc
 ---@param register_num integer
 ---@param value integer

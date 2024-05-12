@@ -8,6 +8,7 @@ int lua_mission_receive(lua_State *L);
 int AP_Logger_Write(lua_State *L);
 int lua_get_i2c_device(lua_State *L);
 int AP_HAL__I2CDevice_write_byte(lua_State *L);
+int AP_HAL__I2CDevice_write_bytes(lua_State *L);
 int AP_HAL__I2CDevice_read_bytes(lua_State *L);
 int AP_HAL__I2CDevice_read_registers(lua_State *L);
 int AP_HAL__UARTDriver_readstring(lua_State *L);

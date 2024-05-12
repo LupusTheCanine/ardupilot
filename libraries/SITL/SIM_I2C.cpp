@@ -37,6 +37,7 @@
 #include "SIM_MS5525.h"
 #include "SIM_MS5611.h"
 #include "SIM_QMC5883L.h"
+#include "SIM_BH1750.h"
 
 #include <signal.h>
 
@@ -85,6 +86,10 @@ static IS31FL3195 is31fl3195;
 #if AP_SIM_COMPASS_QMC5883L_ENABLED
 static QMC5883L qmc5883l;
 #endif
+#if AP_SIM_BH1750_ENABLED
+static BH1750 bh1750_gnd;
+static BH1750 bh1750_vcc;
+#endif
 
 struct i2c_device_at_address {
     uint8_t bus;
@@ -122,6 +127,10 @@ struct i2c_device_at_address {
     { 2, 0x77, ms5611 },        // MS5611: BARO_PROBE_EXT = 2
 #if AP_SIM_COMPASS_QMC5883L_ENABLED
     { 2, 0x0D, qmc5883l },
+#endif
+#if AP_SIM_BH1750_ENABLED
+    { 0, 0x5c, bh1750_vcc},
+    { 0, 0x23, bh1750_gnd},
 #endif
 };
 

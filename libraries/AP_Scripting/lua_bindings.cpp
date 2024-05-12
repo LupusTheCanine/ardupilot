@@ -595,6 +595,43 @@ int lua_get_i2c_device(lua_State *L) {
 
     return 1;
 }
+
+
+int AP_HAL__I2CDevice_write_bytes(lua_State *L) {
+    const int args = lua_gettop(L);
+    if(args != 2) {
+        return luaL_argerror(L,args, "expected 1 argument");
+    }
+    bool multibyte=false;
+    const int dataLen= ( multibyte=lua_istable(L,2)) ? luaL_len(L,2):1;
+     
+    uint8_t *data = (uint8_t*)malloc(dataLen);
+    if (data == nullptr) {
+        return 0;
+    }
+    if(multibyte){
+        for(int i=1;i<=dataLen;i++)
+        {
+            lua_rawgeti(L,2,i);
+            data[i-1]=get_uint8_t(L,-1);
+            lua_pop(L,1);
+        }
+    }else{
+         data[0]= get_uint8_t(L, 2);
+    }
+    AP_HAL::I2CDevice * ud = *check_AP_HAL__I2CDevice(L, 1);
+
+    ud->get_semaphore()->take_blocking();
+    const bool success = static_cast<bool>(ud->transfer(data,dataLen,nullptr,0));
+    ud->get_semaphore()->give();
+    free(data);
+    lua_pushboolean(L, success);
+    return success;
+
+}
+
+
+
 int AP_HAL__I2CDevice_write_byte(lua_State *L) {
     const int args = lua_gettop(L);
     if(args != 2) {
@@ -627,7 +664,7 @@ int AP_HAL__I2CDevice_read_bytes(lua_State *L) {
 
     uint8_t recv_length = 1;
     if (multi_register) {
-        recv_length = get_uint8_t(L, 2);
+        recv_length = get_uint8_t(L, 2); //optional argument - number of bytes to read if none defaults to 1, return as value
     }
 
     uint8_t data[recv_length];
