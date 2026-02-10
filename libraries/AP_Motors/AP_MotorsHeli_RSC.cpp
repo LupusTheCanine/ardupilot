@@ -224,6 +224,13 @@ const AP_Param::GroupInfo AP_MotorsHeli_RSC::var_info[] = {
 
     // 27 was AROT_IDLE, moved to RSC autorotation sub group
 
+    // @Param: GOV_ESC
+    // @DisplayName: Governor ESC index
+    // @Description: Selects ESC used by helicopter governor for RPM, add 40 to use raw RPM, add 80 to use filtered RPM, set to -1 to use RPM sensor.
+    // @Range: -1 101
+    // @User: Advanced
+    AP_GROUPINFO("GOV_ESC", 28, AP_MotorsHeli_RSC, _esc_index,-1),
+
     AP_GROUPEND
 };
 
@@ -257,7 +264,30 @@ void AP_MotorsHeli_RSC::output(RotorControlState state)
     // _rotor_RPM available to the RSC output
 #if AP_RPM_ENABLED
     const AP_RPM *rpm = AP_RPM::get_singleton();
-    if (rpm != nullptr) {
+    
+    if ((_esc_index>=0 && _esc_index<ESC_TELEM_MAX_ESCS) ||
+        (_esc_index>=40 && _esc_index<ESC_TELEM_MAX_ESCS+40) ||
+        (_esc_index>=80 && _esc_index<ESC_TELEM_MAX_ESCS+80))
+    {
+        const AP_ESC_Telem *esc_telem = AP_ESC_Telem::get_singleton();
+        if(esc_telem != nullptr)
+        {
+            if (_esc_index<ESC_TELEM_MAX_ESCS) {
+                if (!esc_telem->get_rpm(_esc_index, _rotor_rpm)) {
+                    _rotor_rpm = -1;
+                }
+            } else if (_esc_index<ESC_TELEM_MAX_ESCS+40) {
+                float _tmp;
+                if (!esc_telem->get_raw_rpm_and_error_rate(_esc_index-40, _rotor_rpm,_tmp)) {
+                    _rotor_rpm = -1;
+                }
+            } else {
+                if (!esc_telem->get_filtered_rpm(_esc_index-80, _rotor_rpm)) {
+                    _rotor_rpm = -1;
+                }
+            }
+        }
+    }else if (rpm != nullptr) {
         if (!rpm->get_rpm(0, _rotor_rpm)) {
             // No valid RPM data
             _rotor_rpm = -1;
@@ -608,14 +638,15 @@ void AP_MotorsHeli_RSC::write_log(void) const
     // @Field: Gov: Governor Output
     // @Field: Throt: Throttle output
     // @Field: Ramp: throttle ramp up
+    // @Field: RPM: RPM of the main rotor
     // @Field: Stat: RSC state
 
     // Write to data flash log
     AP::logger().WriteStreaming("HRSC",
-                        "TimeUS,I,DRRPM,ERRPM,Gov,Throt,Ramp,Stat",
-                        "s#------",
-                        "F-------",
-                        "QBfffffB",
+                        "TimeUS,I,DRRPM,ERRPM,Gov,Throt,Ramp,RPM,Stat",
+                        "s#-----q-",
+                        "F------0-",
+                        "QBffffffB",
                         AP_HAL::micros64(),
                         _instance,
                         get_desired_speed(),
@@ -623,6 +654,7 @@ void AP_MotorsHeli_RSC::write_log(void) const
                         _governor_output,
                         get_control_output(),
                         _rotor_ramp_output,
+                        _rotor_rpm,
                         uint8_t(_rsc_state));
 }
 #endif
