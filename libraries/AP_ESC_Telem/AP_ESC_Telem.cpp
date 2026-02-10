@@ -42,6 +42,18 @@ const AP_Param::GroupInfo AP_ESC_Telem::var_info[] = {
     // @User: Standard
     AP_GROUPINFO("_MAV_OFS", 1, AP_ESC_Telem, mavlink_offset, 0),
     
+    // @Param: _RPM_FLT
+    // @DisplayName: ESC RPM lowpass filter frequency 
+    // @Description: Frequency of RPM lowpass filter, affects heli governor when using 
+    // @User: Advanced
+    AP_GROUPINFO("_RPM_FLT", 2, AP_ESC_Telem, filter_freq, 15),
+
+    // @Param: _RPM_MAX
+    // @DisplayName: Max accepted RPM
+    // @Description: Max accepted RPM, higher values will be rejected, set to 0 to disable
+    // @User: Advanced
+    AP_GROUPINFO("_RPM_MAX", 3, AP_ESC_Telem, rpm_max, 0),
+
     AP_GROUPEND
 };
 
@@ -226,6 +238,23 @@ bool AP_ESC_Telem::get_raw_rpm_and_error_rate(uint8_t esc_index, float& rpm, flo
     error_rate = rpmdata.error_rate;
     return true;
 }
+
+bool AP_ESC_Telem::get_filtered_rpm(uint8_t esc_index, float& filtered_rpm) const
+{
+    if (esc_index >= ESC_TELEM_MAX_ESCS) {
+        return false;
+    }
+
+    const volatile AP_ESC_Telem_Backend::RpmData& rpmdata = _rpm_data[esc_index];
+
+    if (!rpmdata.data_valid) {
+        return false;
+    }
+
+    filtered_rpm = rpmdata.filtered_rpm;
+    return true;
+}
+
 
 // get an individual ESC's temperature in centi-degrees if available, returns true on success
 bool AP_ESC_Telem::get_temperature(uint8_t esc_index, int16_t& temp) const
@@ -592,7 +621,9 @@ void AP_ESC_Telem::update_rpm(const uint8_t esc_index, const float new_rpm, cons
     if (esc_index >= ESC_TELEM_MAX_ESCS) {
         return;
     }
-
+    if (fabs(new_rpm) > rpm_max && rpm_max > 0.0f) { //ignore if RPM is higher than expected
+        return;
+    }
     _have_data = true;
 
     const uint32_t now = MAX(1U ,AP_HAL::micros()); // don't allow a value of 0 in, as we use this as a flag in places
@@ -601,6 +632,7 @@ void AP_ESC_Telem::update_rpm(const uint8_t esc_index, const float new_rpm, cons
 
     rpmdata.prev_rpm = rpmdata.rpm;
     rpmdata.rpm = new_rpm;
+    rpmdata.filtered_rpm += (new_rpm - rpmdata.filtered_rpm) * calc_lowpass_alpha_dt(((float)(now-last_update_us))/1e6f, filter_freq); 
     rpmdata.update_rate_hz = 1.0e6f / constrain_uint32((now - last_update_us), 100, 1000000U*10U); // limit the update rate 0.1Hz to 10KHz 
     rpmdata.last_update_us = now;
     rpmdata.error_rate = error_rate;
@@ -689,9 +721,10 @@ void AP_ESC_Telem::update()
                 float rpm = AP_Logger::quiet_nanf();
                 get_rpm(i, rpm);
                 float raw_rpm = AP_Logger::quiet_nanf();
+                float filtered_rpm = AP_Logger::quiet_nanf();
                 float rpm_error_rate = AP_Logger::quiet_nanf();
                 get_raw_rpm_and_error_rate(i, raw_rpm, rpm_error_rate);
-
+                get_filtered_rpm(i, filtered_rpm);
                 // Write ESC status messages
                 //   id starts from 0
                 //   rpm, raw_rpm is eRPM (in RPM units)
@@ -707,6 +740,7 @@ void AP_ESC_Telem::update()
                     instance    : i,
                     rpm         : rpm,
                     raw_rpm     : raw_rpm,
+                    filtered_rpm: filtered_rpm,
                     voltage     : telemdata.voltage,
                     current     : telemdata.current,
                     esc_temp    : telemdata.temperature_cdeg,

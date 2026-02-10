@@ -43,6 +43,7 @@ public:
     struct RpmData {
         float    rpm;               // rpm
         float    prev_rpm;          // previous rpm
+        float    filtered_rpm;      // filtered rpm
         float    error_rate;        // error rate in percent
         uint32_t last_update_us;    // last update time, greater then 0 means we've gotten data at some point
         float    update_rate_hz;

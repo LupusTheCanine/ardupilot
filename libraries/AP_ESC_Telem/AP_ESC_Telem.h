@@ -34,6 +34,9 @@ public:
     // get an individual ESC's raw rpm and error rate if available
     bool get_raw_rpm_and_error_rate(uint8_t esc_index, float& rpm, float& error_rate) const;
 
+    // get an individual ESC's lowpass filtered RPM if available, filter frequency configured using ESC_TLM_RPM_FLT, returns true on success
+    bool get_filtered_rpm(uint8_t esc_index, float& filtered_rpm) const;
+
     // get raw telemetry data, used by IOMCU
     const volatile AP_ESC_Telem_Backend::TelemetryData& get_telem_data(uint8_t esc_index) const {
         return _telem_data[esc_index];
@@ -161,7 +164,8 @@ private:
     bool _have_data;
 
     AP_Int8 mavlink_offset;
-
+    AP_Float filter_freq;
+    AP_Float rpm_max;
     static AP_ESC_Telem *_singleton;
 };
 

@@ -13,6 +13,7 @@
 // @Field: Instance: ESC instance number
 // @Field: RPM: reported motor rotation rate
 // @Field: RawRPM: reported motor rotation rate without slew adjustment
+// @Field: FilteredRPM: lowpass filtered motor rotation rate
 // @Field: Volt: Perceived input voltage for the ESC
 // @Field: Curr: Perceived current through the ESC
 // @Field: Temp: ESC temperature in centi-degrees C
@@ -25,6 +26,7 @@ struct PACKED log_Esc {
     uint8_t instance;
     float rpm;
     float raw_rpm;
+    float filtered_rpm;
     float voltage;
     float current;
     int16_t esc_temp;
@@ -59,10 +61,11 @@ struct PACKED log_Edt2 {
     uint8_t status;
 };
 
+// filtered RPM name abbreviated to FRPM to fit within log value name length limit  
 #if HAL_WITH_ESC_TELEM
 #define LOG_STRUCTURE_FROM_ESC_TELEM  \
     { LOG_ESC_MSG, sizeof(log_Esc), \
-      "ESC",  "QBffffcfcf", "TimeUS,Instance,RPM,RawRPM,Volt,Curr,Temp,CTot,MotTemp,Err", "s#qqvAOaO%", "F-00--BCB-" , true }, \
+      "ESC",  "QBfffffcfcf", "TimeUS,Instance,RPM,RawRPM,FRPM,Volt,Curr,Temp,CTot,MotTemp,Err", "s#qqqvAOaO%", "F-000--BCB-" , true }, \
     { LOG_EDT2_MSG, sizeof(log_Edt2), \
       "EDT2",  "QBBBB", "TimeUS,Instance,Stress,MaxStress,Status", "s#---", "F----" , true },
 #else
