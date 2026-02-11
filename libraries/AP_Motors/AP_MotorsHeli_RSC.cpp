@@ -264,7 +264,7 @@ void AP_MotorsHeli_RSC::output(RotorControlState state)
     // _rotor_RPM available to the RSC output
 #if AP_RPM_ENABLED
     const AP_RPM *rpm = AP_RPM::get_singleton();
-    
+#ifdef ESC_TELEM_MAX_ESCS    
     if ((_esc_index>=0 && _esc_index<ESC_TELEM_MAX_ESCS) ||
         (_esc_index>=40 && _esc_index<ESC_TELEM_MAX_ESCS+40) ||
         (_esc_index>=80 && _esc_index<ESC_TELEM_MAX_ESCS+80))
@@ -287,7 +287,9 @@ void AP_MotorsHeli_RSC::output(RotorControlState state)
                 }
             }
         }
-    }else if (rpm != nullptr) {
+    }else
+#endif //ESC_TELEM_MAX_ESCS
+    if (rpm != nullptr) {
         if (!rpm->get_rpm(0, _rotor_rpm)) {
             // No valid RPM data
             _rotor_rpm = -1;
