@@ -130,6 +130,7 @@ private:
     float           _thrcrv_poly[4][4];           // spline polynomials for throttle curve interpolation
     float           _collective_in;               // collective in for throttle curve calculation, range 0-1.0f
     float           _rotor_rpm;                   // rotor rpm from speed sensor for governor
+    uint32_t        _last_rpm_update;             // last RPM update time
     bool            _turbine_start;               // initiates starting sequence
     bool            _starting;                    // tracks if starting sequence has been used
     float           _governor_output;             // governor output for rotor speed control
@@ -139,6 +140,7 @@ private:
     bool            _spooldown_complete;          // flag for determining if spooldown is complete
     float           _fast_idle_timer;             // cooldown timer variable
     uint8_t         _governor_fault_count;        // variable for tracking governor speed sensor faults
+    uint8_t         _governor_engage_count;       // variable for tracking governor readiness to engage
     float           _governor_torque_reference;   // governor reference for load calculations
     float           _idle_throttle;               // current idle throttle setting
 
@@ -165,7 +167,9 @@ private:
     AP_Float        _governor_droop_response;   // governor response to droop under load
     AP_Float        _governor_ff;               // governor feedforward variable
     AP_Float        _governor_range;            // RPM range +/- governor rpm reference setting where governor is operational
+    AP_Float        _gov_filter_freq;           // Governor RPM filter frequency 
     AP_Int16        _cooldown_time;             // cooldown time to provide a fast idle
+    AP_Int8         _esc_index;                 // index of the ESC used for governor RPM control
 
     // parameter accessors to allow conversions
     float       get_critical_speed() const { return _critical_speed * 0.01; }

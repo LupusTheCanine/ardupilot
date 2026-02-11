@@ -202,7 +202,7 @@ const AP_Param::GroupInfo AP_MotorsHeli_RSC::var_info[] = {
 
     // @Param: GOV_RPM
     // @DisplayName: Rotor RPM Setting
-    // @Description: Main rotor RPM that governor maintains when engaged
+    // @Description: Main rotor RPM that governor maintains when engaged, when used with H_RSC_GOV_ESC it is motor RPM instead.
     // @Range: 800 3500
     // @Units: RPM
     // @Increment: 10
@@ -224,6 +224,19 @@ const AP_Param::GroupInfo AP_MotorsHeli_RSC::var_info[] = {
 
     // 27 was AROT_IDLE, moved to RSC autorotation sub group
 
+    // @Param: GOV_ESC
+    // @DisplayName: Governor ESC index
+    // @Description: Selects ESC used by helicopter governor for RPM, add 40 to use raw RPM, add 80 to use filtered RPM, set to -1 to use RPM sensor.
+    // @Range: -1 101
+    // @User: Advanced
+    AP_GROUPINFO("GOV_ESC", 28, AP_MotorsHeli_RSC, _esc_index, -1),
+
+    // @Param: GOV_FLT
+    // @DisplayName: Governor RPM lowpass filter
+    // @Description: Controls governor RPM filter, used with ESC telemetry as it typically has lower resolution.
+    // @Range: 0 50
+    // @User: Advanced
+    AP_GROUPINFO("GOV_FLT", 29, AP_MotorsHeli_RSC, _gov_filter_freq, 0),
     AP_GROUPEND
 };
 
@@ -256,15 +269,41 @@ void AP_MotorsHeli_RSC::output(RotorControlState state)
     _rsc_state = state;
     // _rotor_RPM available to the RSC output
 #if AP_RPM_ENABLED
-    const AP_RPM *rpm = AP_RPM::get_singleton();
-    if (rpm != nullptr) {
-        if (!rpm->get_rpm(0, _rotor_rpm)) {
-            // No valid RPM data
+    #ifdef ESC_TELEM_MAX_ESCS       
+    if (_esc_index>=0 && _esc_index<ESC_TELEM_MAX_ESCS)
+    {
+        const AP_ESC_Telem *esc_telem = AP_ESC_Telem::get_singleton();
+        if(esc_telem != nullptr)
+        {
+            float new_rotor_rpm=-1;
+            if (esc_telem->get_rpm(_esc_index, new_rotor_rpm)){
+                const uint32_t now_us = MAX(1U ,AP_HAL::micros()); // don't allow a value of 0 in, as we use this as a flag 
+                if (_last_rpm_update == 0) {
+                    _rotor_rpm = new_rotor_rpm;
+                    _last_rpm_update = now_us;
+                } else {
+                    new_rotor_rpm = MIN (new_rotor_rpm, 2 *_governor_rpm); //clamp sensor data to prevent excessively high values from entering the filter
+                    _rotor_rpm += (new_rotor_rpm - _rotor_rpm) * calc_lowpass_alpha_dt(((float)(now_us-_last_rpm_update))/1e6f, _gov_filter_freq);
+                    _last_rpm_update = now_us;
+                }
+            } else {
+            _rotor_rpm = -1;
+            _last_rpm_update = 0;
+            }
+        }
+    } else
+#endif //ESC_TELEM_MAX_ESCS
+    {
+        const AP_RPM *rpm = AP_RPM::get_singleton();
+        if (rpm != nullptr) {
+            if (!rpm->get_rpm(0, _rotor_rpm)) {
+                // No valid RPM data
+                _rotor_rpm = -1;
+            }
+        } else {
+            // No RPM because pointer is null
             _rotor_rpm = -1;
         }
-    } else {
-        // No RPM because pointer is null
-        _rotor_rpm = -1;
     }
 #else
     _rotor_rpm = -1;
@@ -554,11 +593,13 @@ void AP_MotorsHeli_RSC::autothrottle_run()
         // if governor is not engaged and rotor is overspeeding by more than governor range due to 
         // misconfigured throttle curve or stuck throttle, set a fault and governor will not operate
         if (_rotor_rpm > (_governor_rpm + _governor_range) && !autorotation.bailing_out()) {
-            _governor_fault = true;
-            governor_reset();
-            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "Governor Fault: Rotor Overspeed");
-            _governor_output = 0.0f;
-
+            _governor_fault_count++;
+            if (_governor_fault_count > 20 ) { //allow for 20 ticks of governor fault to account for spikes produced by AM32 ESCs
+                _governor_fault = true;
+                governor_reset();
+                GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "Governor Fault: Rotor Overspeed");
+                _governor_output = 0.0f;
+            };
         // when performing power recovery from autorotation, this waits for user to load rotor in order to 
         // engage the governor
         } else if (_rotor_rpm > _governor_rpm && autorotation.bailing_out()) {
@@ -570,13 +611,19 @@ void AP_MotorsHeli_RSC::autothrottle_run()
             float torque_limit = (get_governor_torque() * get_governor_torque());
             _governor_output = (_rotor_rpm / (float)_governor_rpm) * torque_limit;
             if (_rotor_rpm >= ((float)_governor_rpm - torque_ref_error_rpm)) {
-                _governor_engage = true;
-                _autothrottle = true;
-                GCS_SEND_TEXT(MAV_SEVERITY_NOTICE, "Governor Engaged");
+                _governor_engage_count++;
+                if (_governor_engage_count > 10) { //slightly delay engagement to handle spurious RPM signals from AM32 esc telemetry
+                    _governor_engage = true;
+                    _autothrottle = true;
+                    GCS_SEND_TEXT(MAV_SEVERITY_NOTICE, "Governor Engaged");
+                }
+            } else {
+                _governor_engage_count = 0;
             }
         } else {
             // temporary use of throttle curve and ramp timer to accelerate rotor to governor min torque rise speed
             _governor_output = 0.0f;
+            _governor_fault_count = 0;
         }
         _control_output = constrain_float(_idle_throttle + (_rotor_ramp_output * (throttlecurve + _governor_output - _idle_throttle)), 0.0f, 1.0f);
         _governor_torque_reference = _control_output;  // increment torque setting to be passed to main power loop
@@ -608,14 +655,15 @@ void AP_MotorsHeli_RSC::write_log(void) const
     // @Field: Gov: Governor Output
     // @Field: Throt: Throttle output
     // @Field: Ramp: throttle ramp up
+    // @Field: RPM: RPM of the main rotor
     // @Field: Stat: RSC state
 
     // Write to data flash log
     AP::logger().WriteStreaming("HRSC",
-                        "TimeUS,I,DRRPM,ERRPM,Gov,Throt,Ramp,Stat",
-                        "s#------",
-                        "F-------",
-                        "QBfffffB",
+                        "TimeUS,I,DRRPM,ERRPM,Gov,Throt,Ramp,RPM,Stat",
+                        "s#-----q-",
+                        "F------0-",
+                        "QBffffffB",
                         AP_HAL::micros64(),
                         _instance,
                         get_desired_speed(),
@@ -623,6 +671,7 @@ void AP_MotorsHeli_RSC::write_log(void) const
                         _governor_output,
                         get_control_output(),
                         _rotor_ramp_output,
+                        _rotor_rpm,
                         uint8_t(_rsc_state));
 }
 #endif
