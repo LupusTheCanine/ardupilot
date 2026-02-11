@@ -621,7 +621,7 @@ void AP_ESC_Telem::update_rpm(const uint8_t esc_index, const float new_rpm, cons
     if (esc_index >= ESC_TELEM_MAX_ESCS) {
         return;
     }
-    if (fabs(new_rpm) > rpm_max && rpm_max > 0.0f) { //ignore if RPM is higher than expected
+    if (fabsf(new_rpm) > rpm_max && rpm_max > 0.0f) { //ignore if RPM is higher than expected
         return;
     }
     _have_data = true;
