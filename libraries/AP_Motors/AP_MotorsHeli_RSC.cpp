@@ -19,6 +19,7 @@
 #include "AP_MotorsHeli_RSC.h"
 #include <AP_RPM/AP_RPM.h>
 #include <AP_Logger/AP_Logger.h>
+#include <AP_BattMonitor/AP_BattMonitor.h>
 
 // default main rotor speed (ch8 out) as a number from 0 ~ 100
 #define AP_MOTORS_HELI_RSC_SETPOINT             70
@@ -224,6 +225,36 @@ const AP_Param::GroupInfo AP_MotorsHeli_RSC::var_info[] = {
 
     // 27 was AROT_IDLE, moved to RSC autorotation sub group
 
+    // @Param: BAT_IDX
+    // @DisplayName: Main rotor motor battery index
+    // @Description: Which battery monitor should be used for main rotor motor battery voltage compensation
+    // @Range: 0 15
+    // @Increment: 1
+    // @User: Standard
+    AP_GROUPINFO("BAT_IDX", 28, AP_MotorsHeli_RSC, batt_idx, 0),
+    
+    // @Param: BAT_V_MAX
+    // @DisplayName: Main rotor motor battery voltage compensation maximum voltage
+    // @Description: Main rotor motor voltage compensation maximum voltage (voltage above this will have no additional scaling effect on thrust). Should not be used with external governor. Recommend 4.2 * cell count, 0 = Disabled
+    // @Range: 6 53
+    // @Units: V
+    // @User: Standard
+    AP_GROUPINFO("BAT_V_MAX", 29, AP_MotorsHeli_RSC, batt_voltage_max, 0),
+
+    // @Param: BAT_V_MIN
+    // @DisplayName: Main rotor motor battery voltage compensation minimum voltage 
+    // @Description: Main rotor motor voltage compensation minimum voltage (voltage below this will have no additional scaling effect on thrust). Should not be used with external governor. Recommend 3.3 * cell count, 0 = Disabled
+    // @Range: 6 42
+    // @Units: V
+    // @User: Standard
+    AP_GROUPINFO("BAT_V_MIN", 30, AP_MotorsHeli_RSC, batt_voltage_min, 0),
+
+    // @Param: BAT_EXP
+    // @DisplayName: Main rotor motor battery compensation exponent
+    // @Range: 1 1.5
+    // @Description: Main rotor motor battery compensation exponent. comp=(H_RSC_BAT_V_MAX/Bat[H_RSC_BAT_IDX].VoltR)^H_RSC_BAT_EXP) Should be in 1.2-1.5 range.
+    // @User: Standard
+    AP_GROUPINFO("BAT_EXP", 31, AP_MotorsHeli_RSC, bat_exp, 1.35f),
     AP_GROUPEND
 };
 
@@ -282,6 +313,19 @@ void AP_MotorsHeli_RSC::output(RotorControlState state)
         _last_update_us = now;
     }
 
+    // battety compensation logic
+    float batt_voltage = AP::battery().voltage_resting_estimate(batt_idx);
+    float batt_gain=1;
+    if ((batt_voltage_max <= 0) || (batt_voltage_min <= 0) || (batt_voltage_min >= batt_voltage_max) || (batt_voltage < 0.25 * batt_voltage_min)) {
+        batt_volt_filt.reset(1);
+        batt_gain = 1;
+    } else {
+        batt_voltage_min.set(MAX(batt_voltage_min, batt_voltage_max * 0.6));
+        batt_voltage = constrain_float(batt_voltage, batt_voltage_min, batt_voltage_max);
+        batt_gain = powf(1 / batt_volt_filt.apply(batt_voltage / batt_voltage_max, dt), bat_exp);
+
+    }
+    
     switch (state) {
     case RotorControlState::STOP:
         // set rotor ramp to decrease speed to zero, this happens instantly inside update_rotor_ramp()
@@ -377,6 +421,8 @@ void AP_MotorsHeli_RSC::output(RotorControlState state)
         }
         break;
     }
+    
+    _control_output = _control_output * batt_gain; // 1 if no compensation is active >=1 otherwise;
 
     // update rotor speed run-up estimate
     update_rotor_runup(dt);
