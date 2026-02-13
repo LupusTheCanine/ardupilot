@@ -19,6 +19,7 @@
 #include "AP_MotorsHeli_RSC.h"
 #include <AP_RPM/AP_RPM.h>
 #include <AP_Logger/AP_Logger.h>
+#include <AP_ESC_Telem/AP_ESC_Telem.h>
 
 // default main rotor speed (ch8 out) as a number from 0 ~ 100
 #define AP_MOTORS_HELI_RSC_SETPOINT             70
@@ -256,9 +257,10 @@ void AP_MotorsHeli_RSC::output(RotorControlState state)
     _rsc_state = state;
     // _rotor_RPM available to the RSC output
 #if AP_RPM_ENABLED
-    const AP_RPM *rpm = AP_RPM::get_singleton();
-    if (rpm != nullptr) {
-        if (!rpm->get_rpm(0, _rotor_rpm)) {
+    const AP_ESC_Telem *esc = AP_ESC_Telem::get_singleton();
+    //const AP_RPM *rpm = AP_RPM::get_singleton();
+    if (esc != nullptr) {
+        if (!esc->get_rpm(0, _rotor_rpm)) {
             // No valid RPM data
             _rotor_rpm = -1;
         }
@@ -554,10 +556,13 @@ void AP_MotorsHeli_RSC::autothrottle_run()
         // if governor is not engaged and rotor is overspeeding by more than governor range due to 
         // misconfigured throttle curve or stuck throttle, set a fault and governor will not operate
         if (_rotor_rpm > (_governor_rpm + _governor_range) && !autorotation.bailing_out()) {
-            _governor_fault = true;
-            governor_reset();
-            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "Governor Fault: Rotor Overspeed");
-            _governor_output = 0.0f;
+            _governor_fault_count++;
+            if(_governor_fault_count > 20) {
+                _governor_fault = true;
+                governor_reset();
+                GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "Governor Fault: Rotor Overspeed");
+                _governor_output = 0.0f;
+            }; //we do not reset fault count as overspeed is expected to happen at most once.
 
         // when performing power recovery from autorotation, this waits for user to load rotor in order to 
         // engage the governor

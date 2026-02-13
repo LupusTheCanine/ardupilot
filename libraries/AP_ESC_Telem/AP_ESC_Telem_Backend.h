@@ -1,6 +1,9 @@
 #pragma once
 
 #include "AP_ESC_Telem_config.h"
+#include <Filter/AverageFilter.h>
+
+typedef AverageFilter<float,float,15> RPM_Filter;
 
 #if HAL_WITH_ESC_TELEM
 
@@ -43,10 +46,13 @@ public:
     struct RpmData {
         float    rpm;               // rpm
         float    prev_rpm;          // previous rpm
+        float    rpm_raw;           // unfiltered RPM
         float    error_rate;        // error rate in percent
         uint32_t last_update_us;    // last update time, greater then 0 means we've gotten data at some point
         float    update_rate_hz;
         bool     data_valid;        // if this isn't set to true, then the ESC data should be ignored
+        RPM_Filter rpm_filter;
+
     };
 
     enum TelemetryType {

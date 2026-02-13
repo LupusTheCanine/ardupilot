@@ -222,7 +222,7 @@ bool AP_ESC_Telem::get_raw_rpm_and_error_rate(uint8_t esc_index, float& rpm, flo
         return false;
     }
 
-    rpm = rpmdata.rpm;
+    rpm = rpmdata.rpm_raw;
     error_rate = rpmdata.error_rate;
     return true;
 }
@@ -600,7 +600,8 @@ void AP_ESC_Telem::update_rpm(const uint8_t esc_index, const float new_rpm, cons
     const auto last_update_us = rpmdata.last_update_us;
 
     rpmdata.prev_rpm = rpmdata.rpm;
-    rpmdata.rpm = new_rpm;
+    rpmdata.rpm = ((RPM_Filter&)(rpmdata.rpm_filter)).apply(new_rpm);
+    rpmdata.rpm_raw=new_rpm;
     rpmdata.update_rate_hz = 1.0e6f / constrain_uint32((now - last_update_us), 100, 1000000U*10U); // limit the update rate 0.1Hz to 10KHz 
     rpmdata.last_update_us = now;
     rpmdata.error_rate = error_rate;

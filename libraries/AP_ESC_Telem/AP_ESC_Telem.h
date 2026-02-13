@@ -4,7 +4,6 @@
 #include <AP_Param/AP_Param.h>
 #include <SRV_Channel/SRV_Channel_config.h>
 #include "AP_ESC_Telem_Backend.h"
-
 #if HAL_WITH_ESC_TELEM
 
 #ifndef ESC_TELEM_MAX_ESCS
