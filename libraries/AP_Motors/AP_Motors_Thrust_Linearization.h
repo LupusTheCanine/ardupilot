@@ -2,6 +2,7 @@
 
 #include <AP_Param/AP_Param.h>
 #include <Filter/LowPassFilter.h>
+#include <functional>
 
 class AP_Motors;
 class Thrust_Linearization {
@@ -10,6 +11,8 @@ friend class AP_MotorsMulticopter_test;
 friend class AP_MotorsHeli_Single;
 public:
     Thrust_Linearization(AP_Motors& _motors);
+
+    Thrust_Linearization( std::function<bool(void)> _use_raw_voltage);
 
     // Apply_thrust_curve_and_volt_scaling - returns throttle in the range 0 ~ 1
     float apply_thrust_curve_and_volt_scaling(float thrust) const;
@@ -59,6 +62,8 @@ private:
     float               lift_max;          // maximum lift ratio from battery voltage
     float               throttle_limit;    // ratio of throttle limit between hover and maximum
     LowPassFilterFloat  batt_voltage_filt; // filtered battery voltage expressed as a percentage (0 ~ 1.0) of batt_voltage_max
+    uint32_t            last_update;
 
-    AP_Motors& motors;
+    std::function<bool()> use_raw_voltage;
+    //AP_Motors& motors;
 };

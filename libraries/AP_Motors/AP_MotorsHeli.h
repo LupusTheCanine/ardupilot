@@ -42,7 +42,8 @@ public:
     /// Constructor
     AP_MotorsHeli( uint16_t speed_hz = AP_MOTORS_HELI_SPEED_DEFAULT) :
         AP_Motors(speed_hz),
-        _main_rotor(SRV_Channel::k_heli_rsc, AP_MOTORS_HELI_RSC, 0U)
+        _main_rotor(SRV_Channel::k_heli_rsc, AP_MOTORS_HELI_RSC, 0U,
+            [this](){return heli_option(AP_MotorsHeli::HeliOption::MAIN_ROTOR_USE_RAW_VOLTAGE);})
     {
         AP_Param::setup_object_defaults(this, var_info);
     };
@@ -145,6 +146,8 @@ public:
     // enum for heli optional features
     enum class HeliOption {
         USE_LEAKY_I                     = (1<<0),   // 1
+        MAIN_ROTOR_USE_RAW_VOLTAGE      = (1<<1),   // 2
+        TAIL_ROTOR_USE_RAW_VOLTAGE      = (1<<2),   // 4
     };
 
     // use leaking integrator management scheme

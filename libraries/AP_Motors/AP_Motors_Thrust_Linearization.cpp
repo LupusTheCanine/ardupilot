@@ -5,6 +5,7 @@
 #include <AP_Baro/AP_Baro.h>
 #include <AP_AHRS/AP_AHRS.h>
 #include <AP_Vehicle/AP_Vehicle_Type.h>
+#include <AP_HAL/system.h>
 
 #define AP_MOTORS_BATT_VOLT_FILT_HZ 0.5 // battery voltage filtered at 0.5hz
 
@@ -86,10 +87,22 @@ const AP_Param::GroupInfo Thrust_Linearization::var_info[] = {
 
     AP_GROUPEND
 };
+Thrust_Linearization::Thrust_Linearization(std::function<bool(void)> _use_raw_voltage) :
+    lift_max(1.0),
+    use_raw_voltage(_use_raw_voltage)
+    {
+    // setup battery voltage filtering
+    batt_voltage_filt.set_cutoff_frequency(AP_MOTORS_BATT_VOLT_FILT_HZ);
+    batt_voltage_filt.reset(1.0);
+
+#if APM_BUILD_TYPE(APM_BUILD_Heli)
+    AP_Param::setup_object_defaults(this, var_info);
+#endif
+}
 
 Thrust_Linearization::Thrust_Linearization(AP_Motors& _motors) :
     lift_max(1.0),
-    motors(_motors)
+    use_raw_voltage([&_motors](){return _motors.has_option(AP_Motors::MotorOptions::BATT_RAW_VOLTAGE);})
 {
     // setup battery voltage filtering
     batt_voltage_filt.set_cutoff_frequency(AP_MOTORS_BATT_VOLT_FILT_HZ);
@@ -158,7 +171,7 @@ void Thrust_Linearization::update_lift_max_from_batt_voltage()
 #if AP_BATTERY_ENABLED
     // sanity check battery_voltage_min is not too small
     // if disabled or misconfigured exit immediately
-    float _batt_voltage = motors.has_option(AP_Motors::MotorOptions::BATT_RAW_VOLTAGE) ? AP::battery().voltage(batt_idx) : AP::battery().voltage_resting_estimate(batt_idx);
+    float _batt_voltage = use_raw_voltage() ? AP::battery().voltage(batt_idx) : AP::battery().voltage_resting_estimate(batt_idx);
 
     if ((batt_voltage_max <= 0) || (batt_voltage_min >= batt_voltage_max) || (_batt_voltage < 0.25 * batt_voltage_min)) {
         batt_voltage_filt.reset(1.0);
@@ -171,14 +184,16 @@ void Thrust_Linearization::update_lift_max_from_batt_voltage()
     // constrain resting voltage estimate (resting voltage is actual voltage with sag removed based on current draw and resistance)
     _batt_voltage = constrain_float(_batt_voltage, batt_voltage_min, batt_voltage_max);
 
-    if (!motors.has_option(AP_Motors::MotorOptions::BATT_RAW_VOLTAGE)) {
-        // filter at 0.5 Hz
-        batt_voltage_filt.apply(_batt_voltage / batt_voltage_max, motors.get_dt_s());
-    } else {
+    if (use_raw_voltage() || last_update == 0) {
         // reset is equivalent to no filtering
         batt_voltage_filt.reset(_batt_voltage / batt_voltage_max);
+        last_update = AP_HAL::micros();
+    } else {
+        // filter at 0.5 Hz
+        uint32_t now = MAX(1U,AP_HAL::micros());
+        float dt = float(now - last_update) * 1e-6;
+        batt_voltage_filt.apply(_batt_voltage / batt_voltage_max, dt);
     }
-
     // calculate lift max
     float thrust_curve_expo = constrain_float(curve_expo, -1.0, 1.0);
     lift_max = batt_voltage_filt.get() * (1 - thrust_curve_expo) + thrust_curve_expo * batt_voltage_filt.get() * batt_voltage_filt.get();
