@@ -544,14 +544,14 @@ float AP_MotorsHeli_RSC::update_battery_compensation(float dt){
         batt_volt_filt.reset(1);
         return 1.0f;
     }
-    float batt_voltage = AP::battery().voltage_resting_estimate(batt_idx);
+    float batt_voltage = use_raw_voltage() ? AP::battery().voltage(batt_idx) : AP::battery().voltage_resting_estimate(batt_idx);
     if (batt_voltage < 0.25 * batt_voltage_min) { //battery voltage this low leads to dangerously high compensation coefficient, disabling 
         batt_volt_filt.reset(1);
         return 1.0f;
     } else {
         batt_voltage_min.set(MAX(batt_voltage_min, batt_voltage_max * 0.6));
         batt_voltage = constrain_float(batt_voltage, batt_voltage_min, batt_voltage_max);
-        return 1 / batt_volt_filt.apply(batt_voltage / batt_voltage_max, dt);
+        return 1 / batt_volt_filt.apply(batt_voltage / batt_voltage_max, dt); // unlike copter voltage compensation we do not expect very large voltage swings so we filter raw voltage too to avoid introducing voltage measurement noise into tail drive
     }
 }   
 

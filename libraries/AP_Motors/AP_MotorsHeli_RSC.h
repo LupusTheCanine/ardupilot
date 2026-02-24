@@ -7,6 +7,7 @@
 #include <AP_Logger/AP_Logger_config.h>
 #include <AC_Autorotation/RSC_Autorotation.h>
 #include "Filter/LowPassFilter.h"
+#include <functional>
 
 // rotor control modes
 enum RotorControlMode {
@@ -25,10 +26,12 @@ public:
 
     AP_MotorsHeli_RSC(SRV_Channel::Function aux_fn,
                       uint8_t default_channel,
-                      uint8_t inst) :
+                      uint8_t inst,
+                      std::function<bool()> _use_raw_voltage = [](){return false;}) :
         _instance(inst),
         _aux_fn(aux_fn),
-        _default_channel(default_channel)
+        _default_channel(default_channel),
+        use_raw_voltage(_use_raw_voltage)
     {
         AP_Param::setup_object_defaults(this, var_info);
     };
@@ -176,10 +179,11 @@ private:
     AP_Float        batt_voltage_max;           // maximum voltage used to scale lift
     AP_Float        batt_voltage_min;           // minimum voltage used to scale lift
 
+    std::function<bool()> use_raw_voltage;
     // parameter accessors to allow conversions
     float       get_critical_speed() const { return _critical_speed * 0.01; }
     float       get_idle_output() const { return _idle_output * 0.01; }
     float       get_governor_torque() const { return _governor_torque * 0.01; }
     float       get_governor_compensator() const { return _governor_compensator * 0.000001; }
-
+    
 };
