@@ -25,7 +25,7 @@ void AP_RPM_ESC_Telem::update(void)
 {
     AP_ESC_Telem &esc_telem = AP::esc_telem();
     float esc_rpm = esc_telem.get_average_motor_rpm(ap_rpm._params[state.instance].esc_mask);
-    state.rate_rpm = esc_rpm * ap_rpm._params[state.instance].scaling;
+    state.rate_rpm = state.rate_rpm * 0.94 + esc_rpm * ap_rpm._params[state.instance].scaling * 0.06;
     state.signal_quality = 0.5f;
     state.last_reading_ms = AP_HAL::millis();
 }
